@@ -27,9 +27,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    MAIN APP
-========================================= */
+========================================================= */
 
 .app {
   width: calc(100vw - 32px);
@@ -61,8 +61,6 @@ body {
     rgba(0,0,0,0.75);
 }
 
-/* When the lyrics panel is toggled off, collapse to a single
-   centered column instead of a 40/60 split. */
 .app.app-no-lyrics {
   grid-template-columns: 1fr;
 
@@ -72,14 +70,15 @@ body {
   margin-right: auto;
 }
 
-.app.app-no-lyrics .player-panel {
+.app.app-no-lyrics
+.player-panel {
   border-right: none;
 }
 
 
-/* =========================================
+/* =========================================================
    HEADER
-========================================= */
+========================================================= */
 
 .top-bar {
   grid-column: 1 / -1;
@@ -96,6 +95,9 @@ body {
 
   background:
     rgba(8,8,8,0.7);
+
+  backdrop-filter:
+    blur(14px);
 }
 
 .brand {
@@ -109,9 +111,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    LEFT PLAYER
-========================================= */
+========================================================= */
 
 .player-panel {
   position: relative;
@@ -143,11 +145,13 @@ body {
 }
 
 
-/* =========================================
-   ALBUM
-========================================= */
+/* =========================================================
+   ALBUM AREA
+========================================================= */
 
 .album-wrapper {
+  position: relative;
+
   width: min(100%, 390px);
 
   aspect-ratio: 1;
@@ -155,31 +159,331 @@ body {
   flex-shrink: 1;
 
   min-height: 0;
+
+  isolation: isolate;
+
+  overflow: hidden;
+
+  border-radius: 21px;
 }
 
-.album-cover,
-.album-placeholder {
+
+/* =========================================================
+   ARTWORK LIGHT BACKGROUND
+========================================================= */
+
+.album-light-background {
+  position: absolute;
+
+  inset: -20%;
+
+  z-index: 0;
+
+  background-image:
+    var(--album-art);
+
+  background-size: cover;
+
+  background-position: center;
+
+  transform:
+    scale(1.18);
+
+  filter:
+    blur(26px)
+    saturate(1.35);
+
+  opacity: 0.7;
+
+  /*
+   * This gives the background a soft light source
+   * instead of looking like a normal blurred image.
+   */
+  animation:
+    album-light-drift
+    12s
+    ease-in-out
+    infinite alternate;
+}
+
+
+/* =========================================================
+   LIGHT BENDING LAYERS
+========================================================= */
+
+.light-layer {
+  position: absolute;
+
+  pointer-events: none;
+
+  border-radius: 50%;
+
+  mix-blend-mode: screen;
+
+  filter: blur(18px);
+
+  opacity: 0.5;
+}
+
+
+/*
+ * Large curved light.
+ */
+.light-layer-one {
+  width: 70%;
+  height: 140%;
+
+  left: -25%;
+  top: -20%;
+
+  background:
+    linear-gradient(
+      105deg,
+      transparent 15%,
+      rgba(255,255,255,0.28) 42%,
+      rgba(255,255,255,0.04) 55%,
+      transparent 70%
+    );
+
+  transform:
+    rotate(18deg);
+}
+
+
+/*
+ * Opposite light bend.
+ */
+.light-layer-two {
+  width: 85%;
+  height: 120%;
+
+  right: -35%;
+  bottom: -30%;
+
+  background:
+    linear-gradient(
+      75deg,
+      transparent 25%,
+      rgba(255,255,255,0.20) 45%,
+      rgba(255,255,255,0.02) 58%,
+      transparent 72%
+    );
+
+  transform:
+    rotate(-20deg);
+}
+
+
+/*
+ * Fine glass streak.
+ */
+.light-layer-three {
+  width: 45%;
+  height: 160%;
+
+  left: 30%;
+  top: -30%;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(255,255,255,0.12),
+      transparent
+    );
+
+  transform:
+    rotate(12deg);
+
+  filter:
+    blur(9px);
+}
+
+
+@keyframes album-light-drift {
+  0% {
+    transform:
+      scale(1.18)
+      translate(-1%, -1%);
+  }
+
+  50% {
+    transform:
+      scale(1.22)
+      translate(1%, 0%);
+  }
+
+  100% {
+    transform:
+      scale(1.18)
+      translate(0%, 1%);
+  }
+}
+
+
+/* =========================================================
+   GLASS COVER
+========================================================= */
+
+.album-glass {
+  position: absolute;
+
+  inset: 13px;
+
+  z-index: 2;
+
+  display: flex;
+
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden;
+
+  border-radius: 15px;
+
+  /*
+   * Transparent glass.
+   */
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255,255,255,0.075),
+      rgba(255,255,255,0.015) 45%,
+      rgba(255,255,255,0.045)
+    );
+
+  border:
+    1px solid
+    rgba(255,255,255,0.16);
+
+  box-shadow:
+    0 25px 70px
+    rgba(0,0,0,0.55),
+
+    inset 0 1px 0
+    rgba(255,255,255,0.15),
+
+    inset 0 -1px 0
+    rgba(0,0,0,0.2);
+
+  backdrop-filter:
+    blur(4px)
+    saturate(1.15);
+}
+
+
+/* =========================================================
+   ACTUAL ARTWORK
+========================================================= */
+
+.album-cover {
   width: 100%;
   height: 100%;
 
   display: block;
 
-  object-fit: cover;
+  /*
+   * IMPORTANT:
+   *
+   * cover was cropping the top and bottom.
+   * contain keeps the entire image.
+   */
+  object-fit: contain;
 
-  border-radius: 17px;
+  object-position: center;
 
-  border: 1px solid #292929;
+  border-radius: 13px;
 
-  box-shadow:
-    0 25px 80px
-    rgba(0,0,0,0.65);
+  /*
+   * Keep the actual cover sharp.
+   */
+  filter:
+    saturate(1.04)
+    contrast(1.02);
+
+  position: relative;
+
+  z-index: 2;
 }
 
+
+/* =========================================================
+   GLASS REFLECTION
+========================================================= */
+
+.album-reflection {
+  position: absolute;
+
+  inset: 0;
+
+  z-index: 3;
+
+  pointer-events: none;
+
+  background:
+    linear-gradient(
+      115deg,
+      rgba(255,255,255,0.17) 0%,
+      rgba(255,255,255,0.055) 12%,
+      transparent 30%,
+      transparent 65%,
+      rgba(255,255,255,0.035) 82%,
+      rgba(255,255,255,0.10) 100%
+    );
+
+  opacity: 0.7;
+
+  mix-blend-mode: screen;
+}
+
+
+/* =========================================================
+   CURVED GLASS HIGHLIGHT
+========================================================= */
+
+.album-glass-highlight {
+  position: absolute;
+
+  z-index: 4;
+
+  width: 150%;
+  height: 28%;
+
+  top: -8%;
+  left: -25%;
+
+  pointer-events: none;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(255,255,255,0.16),
+      rgba(255,255,255,0.035),
+      transparent
+    );
+
+  transform:
+    rotate(-16deg);
+
+  filter:
+    blur(10px);
+
+  opacity: 0.7;
+}
+
+
+/* =========================================================
+   NO ARTWORK
+========================================================= */
+
 .album-placeholder {
+  width: 100%;
+  height: 100%;
+
   display: flex;
 
   align-items: center;
-
   justify-content: center;
 
   color: #555;
@@ -187,12 +491,18 @@ body {
   background: #111;
 
   font-size: 14px;
+
+  border:
+    1px solid
+    #292929;
+
+  border-radius: 17px;
 }
 
 
-/* =========================================
+/* =========================================================
    SONG INFO
-========================================= */
+========================================================= */
 
 .song-information {
   width: 100%;
@@ -236,9 +546,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    PROGRESS
-========================================= */
+========================================================= */
 
 .progress-section {
   width: 100%;
@@ -285,7 +595,6 @@ body {
   top: 50%;
 
   width: 12px;
-
   height: 12px;
 
   transform:
@@ -309,9 +618,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    CONTROLS
-========================================= */
+========================================================= */
 
 .controls {
   display: flex;
@@ -329,19 +638,19 @@ body {
 
 .control-button {
   width: 48px;
-
   height: 48px;
 
   padding: 0;
 
-  border: 1px solid #303030;
+  border:
+    1px solid
+    #303030;
 
   border-radius: 50%;
 
   display: flex;
 
   align-items: center;
-
   justify-content: center;
 
   background:
@@ -358,7 +667,8 @@ body {
 }
 
 .control-button:hover {
-  transform: scale(1.08);
+  transform:
+    scale(1.08);
 
   background:
     rgba(255,255,255,0.07);
@@ -367,13 +677,14 @@ body {
 }
 
 .control-button:active {
-  transform: scale(0.93);
+  transform:
+    scale(0.93);
 }
 
 
-/* =========================================
-   TRACK BUTTONS (prev / next)
-========================================= */
+/* =========================================================
+   TRACK BUTTONS
+========================================================= */
 
 .track-button {
   font-size: 16px;
@@ -382,9 +693,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    SEEK BUTTONS
-========================================= */
+========================================================= */
 
 .seek-button {
   gap: 0;
@@ -414,13 +725,12 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    PLAY BUTTON
-========================================= */
+========================================================= */
 
 .play-button {
   width: 58px;
-
   height: 58px;
 
   border-color: #777;
@@ -451,9 +761,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    LYRICS LABEL
-========================================= */
+========================================================= */
 
 .lyrics-label {
   margin-top: 18px;
@@ -467,7 +777,9 @@ body {
 
   gap: 8px;
 
-  border: 1px solid #292929;
+  border:
+    1px solid
+    #292929;
 
   border-radius: 30px;
 
@@ -494,13 +806,15 @@ body {
 }
 
 .lyrics-label:hover {
-  transform: scale(1.03);
+  transform:
+    scale(1.03);
 
   border-color: #555;
 }
 
 .lyrics-label.active {
-  background: rgba(255,255,255,0.08);
+  background:
+    rgba(255,255,255,0.08);
 
   border-color: #555;
 
@@ -514,9 +828,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    RIGHT LYRICS PANEL
-========================================= */
+========================================================= */
 
 .lyrics-panel {
   position: relative;
@@ -534,7 +848,9 @@ body {
 
   justify-content: center;
 
-  border: 1px solid #252525;
+  border:
+    1px solid
+    #252525;
 
   border-radius: 13px;
 
@@ -552,9 +868,9 @@ body {
 }
 
 
-/* =========================================
-   TOP / BOTTOM LINES
-========================================= */
+/* =========================================================
+   LYRICS LINES
+========================================================= */
 
 .lyrics-top-line,
 .lyrics-bottom-line {
@@ -590,9 +906,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    WORD STAGE
-========================================= */
+========================================================= */
 
 .word-stage {
   position: relative;
@@ -611,15 +927,14 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    WORD
-========================================= */
+========================================================= */
 
 .lyric-word {
   position: absolute;
 
   left: 50%;
-
   top: 50%;
 
   width: 90%;
@@ -630,7 +945,7 @@ body {
 
   transform:
     translate(
-      -50%,
+      calc(-50% + var(--word-x)),
       calc(-50% + var(--word-y))
     )
     scale(var(--word-scale));
@@ -645,33 +960,32 @@ body {
 
   font-weight: 650;
 
-  letter-spacing: -0.055em;
+  letter-spacing:
+    -0.055em;
 
   opacity: 0.4;
 
   user-select: none;
 
-  /* transform is updated every animation frame in JS to track
-     actual playback position, producing a continuous rolling
-     motion - a CSS transition on it would fight that and add
-     lag. Only color/opacity/filter (which change at discrete
-     word boundaries) get an eased transition. */
+  /*
+   * No transform transition here.
+   *
+   * JavaScript is continuously moving the word stack
+   * according to the actual playback clock.
+   */
   transition:
-    color 0.3s ease,
-
-    opacity 0.3s ease,
-
-    filter 0.3s ease;
+    color 0.28s ease,
+    opacity 0.28s ease,
+    filter 0.28s ease,
+    font-weight 0.28s ease;
 }
 
 
-/* =========================================
+/* =========================================================
    CURRENT WORD
-========================================= */
+========================================================= */
 
 .current-word {
-  --word-scale: 1.18;
-
   color: #f5f2e9;
 
   opacity: 1;
@@ -682,12 +996,6 @@ body {
 
   font-weight: 800;
 
-  font-style: normal;
-
-  animation:
-    word-pop 0.45s
-    cubic-bezier(0.22, 1, 0.36, 1);
-
   text-shadow:
     0 0 15px
     rgba(255,240,205,0.28),
@@ -697,94 +1005,47 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    PREVIOUS WORDS
-========================================= */
+========================================================= */
 
 .previous-word {
-  --word-scale: 0.72;
-
   color:
     rgba(255,255,255,0.24);
 
-  opacity: 0.65;
+  opacity: 0.48;
 
   font-style: italic;
 
   font-weight: 500;
+
+  filter:
+    blur(0.25px);
 }
 
 
-/* =========================================
+/* =========================================================
    NEXT WORDS
-========================================= */
+========================================================= */
 
 .next-word {
-  --word-scale: 0.72;
-
   color:
     rgba(255,255,255,0.20);
 
-  opacity: 0.5;
+  opacity: 0.38;
 
   font-style: italic;
 
   font-weight: 500;
+
+  filter:
+    blur(0.35px);
 }
 
 
-/* =========================================
-   CURRENT-WORD POP-IN
-   Bounces in with a quick overshoot + a brief
-   blur, echoing the fast-motion blur look of a
-   word snapping into focus.
-========================================= */
-
-@keyframes word-pop {
-  0% {
-    transform:
-      translate(
-        -50%,
-        calc(-50% + var(--word-y))
-      )
-      scale(0.7);
-
-    filter: blur(8px);
-
-    opacity: 0.35;
-  }
-
-  55% {
-    transform:
-      translate(
-        -50%,
-        calc(-50% + var(--word-y))
-      )
-      scale(1.1);
-
-    filter: blur(0);
-
-    opacity: 1;
-  }
-
-  100% {
-    transform:
-      translate(
-        -50%,
-        calc(-50% + var(--word-y))
-      )
-      scale(var(--word-scale));
-
-    filter: blur(0);
-
-    opacity: 1;
-  }
-}
-
-
-/* =========================================
+/* =========================================================
    NO LYRICS
-========================================= */
+========================================================= */
 
 .no-lyrics {
   color: #666;
@@ -793,9 +1054,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    LYRICS FOOTER
-========================================= */
+========================================================= */
 
 .lyrics-footer {
   position: absolute;
@@ -816,15 +1077,17 @@ body {
 
   font-size: 10px;
 
-  letter-spacing: 0.36em;
+  letter-spacing:
+    0.36em;
 
-  text-transform: uppercase;
+  text-transform:
+    uppercase;
 }
 
 
-/* =========================================
+/* =========================================================
    WAVEFORM
-========================================= */
+========================================================= */
 
 .waveform {
   height: 30px;
@@ -921,9 +1184,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    LOADING
-========================================= */
+========================================================= */
 
 .loading-screen {
   width: 100vw;
@@ -946,9 +1209,9 @@ body {
 }
 
 
-/* =========================================
+/* =========================================================
    RESPONSIVE
-========================================= */
+========================================================= */
 
 @media (max-width: 1000px) {
 
@@ -957,22 +1220,20 @@ body {
   }
 
   .app {
-    width: 100vw;
+    width: calc(100vw - 20px);
 
     height: auto;
 
-    min-height: 100vh;
+    min-height:
+      calc(100vh - 20px);
 
-    margin: 0;
+    margin: 10px;
 
-    border-radius: 0;
-
-    grid-template-columns: 1fr;
+    grid-template-columns:
+      1fr;
 
     grid-template-rows:
-      60px
-      auto
-      auto;
+      62px auto auto;
   }
 
   .player-panel {
@@ -980,46 +1241,20 @@ body {
 
     border-bottom:
       1px solid #292929;
+
+    padding:
+      30px 25px;
   }
 
   .lyrics-panel {
+    height: 600px;
+
     min-height: 600px;
+  }
 
-    margin: 10px;
+  .album-wrapper {
+    width:
+      min(80vw, 390px);
   }
 }
 
-
-@media (max-width: 600px) {
-
-  .brand {
-    font-size: 8px;
-
-    letter-spacing: 0.25em;
-  }
-
-  .player-panel {
-    padding:
-      28px 22px;
-  }
-
-  .controls {
-    gap: 14px;
-  }
-
-  .control-button {
-    width: 48px;
-
-    height: 48px;
-  }
-
-  .play-button {
-    width: 60px;
-
-    height: 60px;
-  }
-
-  .lyric-word {
-    font-size: 42px;
-  }
-}

@@ -61,6 +61,21 @@ body {
     rgba(0,0,0,0.75);
 }
 
+/* When the lyrics panel is toggled off, collapse to a single
+   centered column instead of a 40/60 split. */
+.app.app-no-lyrics {
+  grid-template-columns: 1fr;
+
+  max-width: 560px;
+
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.app.app-no-lyrics .player-panel {
+  border-right: none;
+}
+
 
 /* =========================================
    HEADER
@@ -357,6 +372,17 @@ body {
 
 
 /* =========================================
+   TRACK BUTTONS (prev / next)
+========================================= */
+
+.track-button {
+  font-size: 16px;
+
+  color: #ccc;
+}
+
+
+/* =========================================
    SEEK BUTTONS
 ========================================= */
 
@@ -454,7 +480,31 @@ body {
 
   font-weight: 550;
 
+  font-family: inherit;
+
+  cursor: pointer;
+
   flex-shrink: 0;
+
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
+}
+
+.lyrics-label:hover {
+  transform: scale(1.03);
+
+  border-color: #555;
+}
+
+.lyrics-label.active {
+  background: rgba(255,255,255,0.08);
+
+  border-color: #555;
+
+  color: #eee;
 }
 
 .lyrics-icon {
@@ -601,15 +651,12 @@ body {
 
   user-select: none;
 
+  /* transform is updated every animation frame in JS to track
+     actual playback position, producing a continuous rolling
+     motion - a CSS transition on it would fight that and add
+     lag. Only color/opacity/filter (which change at discrete
+     word boundaries) get an eased transition. */
   transition:
-    transform 0.4s
-      cubic-bezier(
-        0.2,
-        0.8,
-        0.2,
-        1
-      ),
-
     color 0.3s ease,
 
     opacity 0.3s ease,

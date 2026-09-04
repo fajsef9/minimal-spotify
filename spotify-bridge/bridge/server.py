@@ -217,6 +217,23 @@ async def get_current_song():
     }
 
 
+async def change_position(position_seconds):
+
+    session = await get_session()
+
+    if session is None:
+        return False
+
+    # Windows media APIs use 100-nanosecond ticks.
+    ticks = int(max(0, position_seconds) * 10_000_000)
+
+    try:
+        return await session.try_change_playback_position_async(ticks)
+    except Exception as e:
+        print("Change position error:", repr(e))
+        return False
+
+
 @app.route("/api/seek", methods=["POST"])
 def seek():
     try:

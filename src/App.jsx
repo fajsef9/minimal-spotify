@@ -7,6 +7,7 @@ function App() {
   const [song, setSong] = useState(null);
   const [displayPosition, setDisplayPosition] = useState(0);
   const [currentWord, setCurrentWord] = useState(0);
+  const [showLyrics, setShowLyrics] = useState(true);
 
   const clockRef = useRef({
     position: 0,
@@ -229,21 +230,39 @@ function App() {
             0.1
           );
 
-        const wordDuration =
-          lineDuration /
-          lineWords.length;
+        /*
+         * Weight each word's share of the line's duration by
+         * its character length instead of splitting evenly.
+         * LRC only gives us line-level timestamps, so exact
+         * per-word timing isn't available - but longer words
+         * really do take longer to sing than short ones, so
+         * this tracks the actual audio noticeably better than
+         * a flat split.
+         */
+        const totalChars =
+          lineWords.reduce(
+            (sum, w) => sum + w.length,
+            0
+          ) || 1;
+
+        let cursor = line.time;
 
         lineWords.forEach(
           (word, wordIndex) => {
-            const start =
-              line.time +
-              wordIndex *
-                wordDuration;
+            const share =
+              word.length / totalChars;
+
+            const wordDuration =
+              lineDuration * share;
+
+            const start = cursor;
 
             const end =
-              line.time +
-              (wordIndex + 1) *
-                wordDuration;
+              wordIndex === lineWords.length - 1
+                ? lineEnd
+                : cursor + wordDuration;
+
+            cursor = end;
 
             result.push({
               text: word,
@@ -319,6 +338,52 @@ function App() {
         );
       }
     };
+
+  // ==========================================
+  // PREVIOUS / NEXT TRACK
+  // ==========================================
+
+  const previousTrack = async () => {
+    try {
+      await fetch(
+        `${BRIDGE_URL}/api/previous`,
+        {
+          method: "POST",
+        }
+      );
+
+      setTimeout(
+        getSong,
+        300
+      );
+    } catch (error) {
+      console.error(
+        "Could not skip to previous track:",
+        error
+      );
+    }
+  };
+
+  const nextTrack = async () => {
+    try {
+      await fetch(
+        `${BRIDGE_URL}/api/next`,
+        {
+          method: "POST",
+        }
+      );
+
+      setTimeout(
+        getSong,
+        300
+      );
+    } catch (error) {
+      console.error(
+        "Could not skip to next track:",
+        error
+      );
+    }
+  };
 
   // ==========================================
   // SEEK
@@ -430,12 +495,39 @@ function App() {
       : 0;
 
   // ==========================================
-  // ONLY SHOW:
+  // CONTINUOUS ROLL PROGRESS
   //
-  // 4 PREVIOUS
-  // CURRENT
-  // 2 NEXT
+  // Instead of only moving the word stack when
+  // `currentWord` ticks over to a new integer, we track
+  // how far through the current word's timing window we
+  // are (0 -> 1) and use that as a fractional offset. This
+  // makes the stack glide continuously in sync with actual
+  // playback instead of snapping word to word.
   // ==========================================
+
+  const currentWordObj = words[currentWord];
+
+  let wordProgress = 0;
+
+  if (currentWordObj) {
+    const span =
+      currentWordObj.end - currentWordObj.start;
+
+    wordProgress =
+      span > 0
+        ? (displayPosition - currentWordObj.start) / span
+        : 0;
+
+    wordProgress = Math.min(1, Math.max(0, wordProgress));
+  }
+
+  // ==========================================
+  // ONLY SHOW 3-4 WORDS AT A TIME
+  // (1 before, current, 2 after)
+  // ==========================================
+
+  const PREV_WORDS = 1;
+  const NEXT_WORDS = 2;
 
   const visibleWords = [];
 
@@ -443,13 +535,13 @@ function App() {
     const start =
       Math.max(
         0,
-        currentWord - 4
+        currentWord - PREV_WORDS
       );
 
     const end =
       Math.min(
         words.length,
-        currentWord + 3
+        currentWord + NEXT_WORDS + 1
       );
 
     for (
@@ -481,7 +573,7 @@ function App() {
   // ==========================================
 
   return (
-    <main className="app">
+    <main className={`app ${showLyrics ? "" : "app-no-lyrics"}`}>
 
       {/* =====================================
           HEADER
@@ -581,6 +673,17 @@ function App() {
 
         <div className="controls">
 
+          {/* PREVIOUS TRACK */}
+
+          <button
+            className="control-button track-button"
+            onClick={previousTrack}
+            aria-label="Previous track"
+          >
+            ⏮
+          </button>
+
+
           {/* -10 */}
 
           <button
@@ -649,12 +752,28 @@ function App() {
 
           </button>
 
+
+          {/* NEXT TRACK */}
+
+          <button
+            className="control-button track-button"
+            onClick={nextTrack}
+            aria-label="Next track"
+          >
+            ⏭
+          </button>
+
         </div>
 
 
-        {/* LYRICS LABEL */}
+        {/* LYRICS TOGGLE */}
 
-        <div className="lyrics-label">
+        <button
+          type="button"
+          className={`lyrics-label ${showLyrics ? "active" : ""}`}
+          onClick={() => setShowLyrics((value) => !value)}
+          aria-label="Toggle lyrics"
+        >
 
           <span className="lyrics-icon">
             ▰
@@ -664,7 +783,7 @@ function App() {
             Lyrics
           </span>
 
-        </div>
+        </button>
 
       </section>
 
@@ -672,6 +791,8 @@ function App() {
       {/* =====================================
           RIGHT LYRICS
       ====================================== */}
+
+      {showLyrics && (
 
       <section className="lyrics-panel">
 
@@ -688,6 +809,13 @@ function App() {
                 const distance =
                   word.index -
                   currentWord;
+
+                // Subtract the fractional progress through
+                // the current word so the whole stack glides
+                // continuously instead of jumping in whole
+                // steps.
+                const rolledDistance =
+                  distance - wordProgress;
 
                 let className =
                   "lyric-word";
@@ -716,7 +844,7 @@ function App() {
                     }
                     style={{
                       "--word-y":
-                        `${distance * 74}px`,
+                        `${rolledDistance * 74}px`,
                     }}
                   >
                     {word.text}
@@ -767,6 +895,8 @@ function App() {
         <div className="lyrics-bottom-line" />
 
       </section>
+
+      )}
 
     </main>
   );

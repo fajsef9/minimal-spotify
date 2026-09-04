@@ -15,6 +15,14 @@ function App() {
 
   const lyricRefs = useRef([]);
 
+  // Keep the latest song in a ref so the animation loop (below)
+  // never needs to restart just because a new poll came in.
+  const songRef = useRef(null);
+
+  useEffect(() => {
+    songRef.current = song;
+  }, [song]);
+
   /*
    * Get current Spotify state
    */
@@ -38,12 +46,33 @@ function App() {
       const local = clockRef.current;
 
       /*
-       * Position reported by Windows/Spotify
+       * Position reported by Windows/Spotify, as of the
+       * moment the bridge sampled it (data.sampledAt).
        */
-      const spotifyPosition =
+      let spotifyPosition =
         typeof data.position === "number"
           ? data.position
           : 0;
+
+      /*
+       * The bridge timestamps the instant it sampled the
+       * position (in seconds, wall-clock/Date.now domain).
+       * Everything after that - artwork/lyrics work, network
+       * transfer - takes extra time we were previously
+       * ignoring, which made the reported position stale by
+       * a variable amount every poll. Correct for it here.
+       */
+      if (typeof data.sampledAt === "number") {
+        const latency =
+          Date.now() / 1000 - data.sampledAt;
+
+        // Only trust this if it's a small, sane amount of
+        // elapsed time (avoids weird corrections from clock
+        // skew or a stalled request).
+        if (data.playing && latency > 0 && latency < 5) {
+          spotifyPosition += latency;
+        }
+      }
 
       /*
        * What our local clock currently thinks
@@ -62,28 +91,21 @@ function App() {
       const difference =
         spotifyPosition - estimatedPosition;
 
-      /*
-       * If the difference is tiny, don't jump.
-       *
-       * This prevents:
-       *
-       * 42.9
-       * 43.0
-       * 42.8
-       *
-       * from causing visible movement backwards.
-       */
-      if (Math.abs(difference) < 0.5) {
-        // Keep our local clock.
-        // Small error will naturally be corrected later.
-        local.position = estimatedPosition;
+      if (Math.abs(difference) < 1) {
+        /*
+         * Small drift: ease toward the true position instead
+         * of snapping to it. A hard snap on every poll is what
+         * produced the visible back-and-forth jitter - nudging
+         * by a fraction of the error each poll converges to the
+         * right value without ever being visually jarring.
+         */
+        local.position =
+          estimatedPosition + difference * 0.25;
       } else {
         /*
-         * If there's a significant difference,
-         * Spotify probably skipped, seeked, paused,
-         * or something else changed.
-         *
-         * Snap to Spotify.
+         * Big jump: Spotify was seeked, skipped, or the app
+         * was just opened. Snap immediately - this one should
+         * be instant, not eased.
          */
         local.position = spotifyPosition;
       }
@@ -126,7 +148,10 @@ function App() {
    * Smooth local playback clock.
    *
    * This runs every animation frame instead of
-   * waiting for the API.
+   * waiting for the API. It reads songRef instead of
+   * depending on `song` directly so this loop is set up
+   * once and never torn down/restarted on every poll
+   * (that restart was adding a small stutter each second).
    */
   useEffect(() => {
     let animationFrame;
@@ -145,11 +170,10 @@ function App() {
       /*
        * Prevent going beyond duration.
        */
-      if (
-        song?.duration &&
-        position > song.duration
-      ) {
-        position = song.duration;
+      const duration = songRef.current?.duration;
+
+      if (duration && position > duration) {
+        position = duration;
       }
 
       setDisplayPosition(position);
@@ -164,7 +188,7 @@ function App() {
     return () => {
       cancelAnimationFrame(animationFrame);
     };
-  }, [song]);
+  }, []);
 
 
   /*

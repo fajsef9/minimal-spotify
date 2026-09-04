@@ -1,5 +1,8 @@
 import asyncio
 import base64
+import datetime
+import time
+
 import requests
 
 from flask import Flask, jsonify
@@ -12,6 +15,23 @@ from winrt.windows.media.control import (
 
 app = Flask(__name__)
 CORS(app)
+
+# -------------------------
+# Track cache
+# -------------------------
+#
+# Re-encoding artwork and re-fetching lyrics on every single poll
+# (once a second) is what was actually causing the progress bar to
+# lag and jump: it made each /api/current request take anywhere from
+# ~100ms to a few seconds, and that variable delay was never
+# accounted for on the frontend. We now only redo that expensive
+# work when the track actually changes.
+_track_cache = {
+    "key": None,
+    "artwork": None,
+    "lyrics": None,
+    "syncedLyrics": None,
+}
 
 def get_lyrics(artist, title):
 
@@ -58,6 +78,40 @@ async def get_session():
     return manager.get_current_session()
 
 
+async def encode_artwork(thumbnail):
+
+    stream = await thumbnail.open_read_async()
+
+    input_stream = stream.get_input_stream_at(0)
+
+    from winrt.windows.storage.streams import DataReader
+
+    reader = DataReader(input_stream)
+
+    size = stream.size
+
+    artwork = None
+
+    if size > 0:
+
+        loaded = await reader.load_async(size)
+
+        data = bytearray(loaded)
+
+        reader.read_bytes(data)
+
+        artwork = (
+            "data:image/jpeg;base64,"
+            + base64.b64encode(data).decode("utf-8")
+        )
+
+    reader.close()
+    input_stream.close()
+    stream.close()
+
+    return artwork
+
+
 async def get_current_song():
 
     session = await get_session()
@@ -68,7 +122,10 @@ async def get_current_song():
             "title": "",
             "artist": "",
             "album": "",
-            "artwork": None
+            "artwork": None,
+            "position": 0,
+            "duration": 0,
+            "sampledAt": time.time()
         }
 
     properties = await session.try_get_media_properties_async()
@@ -76,49 +133,84 @@ async def get_current_song():
     playback = session.get_playback_info()
     timeline = session.get_timeline_properties()
 
-    artwork = None
+    is_playing = (
+        playback.playback_status
+        == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING
+    )
 
-    if properties.thumbnail:
+    position = timeline.position.total_seconds()
 
-        stream = await properties.thumbnail.open_read_async()
+    # -------------------------
+    # Correct for staleness in Windows' own timeline snapshot.
+    #
+    # GlobalSystemMediaTransportControlsSessionTimelineProperties.position
+    # is only a snapshot as of `last_updated_time` - Spotify doesn't push
+    # position updates every frame, only occasionally. If we don't account
+    # for how long ago that snapshot was taken, our reported position is
+    # always a little behind reality.
+    # -------------------------
+    try:
+        last_updated = timeline.last_updated_time
 
-        input_stream = stream.get_input_stream_at(0)
+        if last_updated is not None and is_playing:
 
-        from winrt.windows.storage.streams import DataReader
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
 
-        reader = DataReader(input_stream)
+            elapsed = (now_utc - last_updated).total_seconds()
 
-        size = stream.size
+            # Sanity clamp - if this looks bogus (clock skew, bad
+            # value, huge gap), ignore it rather than risk a wild jump.
+            if 0 <= elapsed <= 15:
+                position += elapsed
 
-        if size > 0:
+    except Exception:
+        pass
 
-            loaded = await reader.load_async(size)
+    # Capture the wall-clock time right now, as close as possible to
+    # when we actually sampled the position above. Everything after
+    # this point (artwork encoding, lyrics lookup, network transfer)
+    # can take variable amounts of time, so the frontend uses this
+    # timestamp to correct for that instead of assuming the position
+    # is accurate at the moment the response arrives.
+    sampled_at = time.time()
 
-            data = bytearray(loaded)
+    title = properties.title
+    artist = properties.artist
+    album = properties.album_title
 
-            reader.read_bytes(data)
+    track_key = (artist, title)
 
-            artwork = (
-                "data:image/jpeg;base64,"
-                + base64.b64encode(data).decode("utf-8")
-            )
+    # Only redo the expensive work (artwork decode, lyrics fetch) when
+    # the track has actually changed, instead of every single poll.
+    if track_key != _track_cache["key"]:
 
-        reader.close()
-        input_stream.close()
-        stream.close()
+        artwork = None
+
+        if properties.thumbnail:
+            artwork = await encode_artwork(properties.thumbnail)
+
+        if artist and title:
+            lyrics = get_lyrics(artist, title)
+        else:
+            lyrics = {"lyrics": None, "syncedLyrics": None}
+
+        _track_cache["key"] = track_key
+        _track_cache["artwork"] = artwork
+        _track_cache["lyrics"] = lyrics["lyrics"]
+        _track_cache["syncedLyrics"] = lyrics["syncedLyrics"]
 
     return {
-        "playing": (
-            playback.playback_status
-            == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING
-        ),
-        "title": properties.title,
-        "artist": properties.artist,
-        "album": properties.album_title,
-        "artwork": artwork,
+        "playing": is_playing,
+        "title": title,
+        "artist": artist,
+        "album": album,
+        "artwork": _track_cache["artwork"],
+        "lyrics": _track_cache["lyrics"],
+        "syncedLyrics": _track_cache["syncedLyrics"],
 
-        "position": timeline.position.total_seconds(),
-        "duration": timeline.end_time.total_seconds()
+        "position": position,
+        "duration": timeline.end_time.total_seconds(),
+        "sampledAt": sampled_at
     }
 
 
@@ -128,21 +220,6 @@ def current():
     try:
 
         data = asyncio.run(get_current_song())
-
-        if data["title"] and data["artist"]:
-
-            lyrics = get_lyrics(
-                data["artist"],
-                data["title"]
-            )
-
-            data["lyrics"] = lyrics["lyrics"]
-            data["syncedLyrics"] = lyrics["syncedLyrics"]
-
-        else:
-
-            data["lyrics"] = None
-            data["syncedLyrics"] = None
 
         return jsonify(data)
 

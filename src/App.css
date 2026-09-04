@@ -682,6 +682,12 @@ body {
 
   font-weight: 800;
 
+  font-style: normal;
+
+  animation:
+    word-pop 0.45s
+    cubic-bezier(0.22, 1, 0.36, 1);
+
   text-shadow:
     0 0 15px
     rgba(255,240,205,0.28),
@@ -702,6 +708,10 @@ body {
     rgba(255,255,255,0.24);
 
   opacity: 0.65;
+
+  font-style: italic;
+
+  font-weight: 500;
 }
 
 
@@ -716,6 +726,59 @@ body {
     rgba(255,255,255,0.20);
 
   opacity: 0.5;
+
+  font-style: italic;
+
+  font-weight: 500;
+}
+
+
+/* =========================================
+   CURRENT-WORD POP-IN
+   Bounces in with a quick overshoot + a brief
+   blur, echoing the fast-motion blur look of a
+   word snapping into focus.
+========================================= */
+
+@keyframes word-pop {
+  0% {
+    transform:
+      translate(
+        -50%,
+        calc(-50% + var(--word-y))
+      )
+      scale(0.7);
+
+    filter: blur(8px);
+
+    opacity: 0.35;
+  }
+
+  55% {
+    transform:
+      translate(
+        -50%,
+        calc(-50% + var(--word-y))
+      )
+      scale(1.1);
+
+    filter: blur(0);
+
+    opacity: 1;
+  }
+
+  100% {
+    transform:
+      translate(
+        -50%,
+        calc(-50% + var(--word-y))
+      )
+      scale(var(--word-scale));
+
+    filter: blur(0);
+
+    opacity: 1;
+  }
 }
 
 

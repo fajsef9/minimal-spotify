@@ -7,6 +7,7 @@ import requests
 
 from flask import Flask, jsonify
 from flask_cors import CORS
+from flask import request
 
 from winrt.windows.media.control import (
     GlobalSystemMediaTransportControlsSessionManager,
@@ -32,6 +33,8 @@ _track_cache = {
     "lyrics": None,
     "syncedLyrics": None,
 }
+
+
 
 def get_lyrics(artist, title):
 
@@ -213,6 +216,28 @@ async def get_current_song():
         "sampledAt": sampled_at
     }
 
+
+@app.route("/api/seek", methods=["POST"])
+def seek():
+    try:
+        data = request.get_json()
+
+        position = float(data.get("position", 0))
+
+        asyncio.run(change_position(position))
+
+        return {
+            "success": True,
+            "position": position
+        }
+
+    except Exception as e:
+        print("Seek error:", e)
+
+        return {
+            "success": False,
+            "error": str(e)
+        }, 500
 
 @app.route("/api/current")
 def current():

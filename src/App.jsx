@@ -48,10 +48,31 @@ function App() {
 
       const now = performance.now();
 
-      const spotifyPosition =
+      let spotifyPosition =
         typeof data.position === "number"
           ? data.position
           : 0;
+
+      /*
+       * Correct for the time between the bridge sampling the
+       * position (data.sampledAt, a wall-clock timestamp) and
+       * us actually receiving the response here - network time
+       * plus whatever the request took server-side. Without this,
+       * the reported position is always a little stale, by however
+       * long that round trip happened to take that particular poll.
+       */
+      if (typeof data.sampledAt === "number") {
+        const latency =
+          Date.now() / 1000 - data.sampledAt;
+
+        if (
+          data.playing &&
+          latency > 0 &&
+          latency < 5
+        ) {
+          spotifyPosition += latency;
+        }
+      }
 
       const clock = clockRef.current;
 
@@ -185,10 +206,67 @@ function App() {
   }, [song?.syncedLyrics]);
 
   // ==========================================
-  // TURN LINES INTO WORDS
+  // ESTIMATE SYLLABLES PER WORD
+  //
+  // LRC lyrics only give us a timestamp per line, not per
+  // word, so word-level timing is always an estimate - lrclib
+  // (the source this app uses) doesn't provide true word-by-word
+  // sync. Splitting a line's duration by character count (the
+  // previous approach) is a weak proxy - a word like "strengths"
+  // is one syllable but nine characters, so it was getting way
+  // more screen time than it's actually sung for. Syllable count
+  // tracks spoken/sung duration much more closely.
   // ==========================================
 
-  const words = useMemo(() => {
+  const estimateSyllables = (word) => {
+    const clean = word
+      .toLowerCase()
+      .replace(/[^a-z']/g, "");
+
+    if (!clean) {
+      return 1;
+    }
+
+    const vowelGroups =
+      clean.match(/[aeiouy]+/g);
+
+    let count =
+      vowelGroups ? vowelGroups.length : 1;
+
+    // Silent trailing "e" (e.g. "like", "summer" -> "summe")
+    if (
+      clean.endsWith("e") &&
+      !clean.endsWith("le") &&
+      count > 1
+    ) {
+      count -= 1;
+    }
+
+    return Math.max(1, count);
+  };
+
+  // Generous ceiling on how long a single word is allowed to stay
+  // highlighted, in seconds per estimated syllable. This is the
+  // actual fix for most of the "words drift out of sync" cases:
+  // the previous version always stretched a line's *last* word all
+  // the way to the next line's timestamp, so if there was a musical
+  // pause / breath gap between two lines (very common), that entire
+  // silent gap got attributed to one word as if it were being sung
+  // that whole time - throwing every word before it out of sync too,
+  // since they all shared the same inflated line duration. Capping
+  // each word's duration means gaps are now just left as silence
+  // (nothing highlighted) instead of being stretched onto a word.
+  const MAX_SECONDS_PER_SYLLABLE = 0.55;
+
+  // ==========================================
+  // TURN LINES INTO WORDS (SYLLABLE ESTIMATE)
+  //
+  // This is the fallback path - used whenever real word-level
+  // timing (song.richWords, from the bridge's audio-alignment
+  // step) isn't available for the current track yet.
+  // ==========================================
+
+  const estimatedWords = useMemo(() => {
     if (!parsedLines.length) {
       return [];
     }
@@ -231,17 +309,27 @@ function App() {
           );
 
         /*
-         * Weight each word's share of the line's duration by
-         * its character length instead of splitting evenly.
-         * LRC only gives us line-level timestamps, so exact
-         * per-word timing isn't available - but longer words
-         * really do take longer to sing than short ones, so
-         * this tracks the actual audio noticeably better than
-         * a flat split.
+         * Weight each word by estimated syllables, with a small
+         * bonus for trailing punctuation (a comma/period usually
+         * means a brief lingering pause before the next word).
          */
-        const totalChars =
-          lineWords.reduce(
-            (sum, w) => sum + w.length,
+        const wordWeights =
+          lineWords.map((word) => {
+            const syllables =
+              estimateSyllables(word);
+
+            const hasPause =
+              /[,.!?;:]$/.test(word);
+
+            return (
+              syllables +
+              (hasPause ? 0.4 : 0)
+            );
+          });
+
+        const totalWeight =
+          wordWeights.reduce(
+            (sum, w) => sum + w,
             0
           ) || 1;
 
@@ -249,18 +337,30 @@ function App() {
 
         lineWords.forEach(
           (word, wordIndex) => {
-            const share =
-              word.length / totalChars;
+            const weight =
+              wordWeights[wordIndex];
 
-            const wordDuration =
-              lineDuration * share;
+            const proportionalDuration =
+              lineDuration *
+              (weight / totalWeight);
+
+            // Never let a single word's highlighted duration run
+            // past what's plausible for its syllable count, even
+            // if the line as a whole spans a long silent gap.
+            const cappedDuration =
+              Math.min(
+                proportionalDuration,
+                weight * MAX_SECONDS_PER_SYLLABLE
+              );
+
+            const duration =
+              Math.max(
+                cappedDuration,
+                0.12
+              );
 
             const start = cursor;
-
-            const end =
-              wordIndex === lineWords.length - 1
-                ? lineEnd
-                : cursor + wordDuration;
+            const end = start + duration;
 
             cursor = end;
 
@@ -280,6 +380,35 @@ function App() {
     parsedLines,
     song?.duration,
   ]);
+
+  // ==========================================
+  // REAL WORD-LEVEL SYNC, WHEN AVAILABLE
+  //
+  // The bridge records the song's own audio in the background and
+  // aligns it to the real lyrics text (see server.py) - this is
+  // only present once that's finished for the current track. Until
+  // then (or if it fails for any reason - missing packages, no mic
+  // permission, alignment error), song.richWords is just absent and
+  // we transparently keep using the syllable estimate above. Same
+  // shape either way, so nothing downstream needs to know which one
+  // it's looking at.
+  // ==========================================
+
+  const words = useMemo(() => {
+    if (
+      !Array.isArray(song?.richWords) ||
+      song.richWords.length === 0
+    ) {
+      return estimatedWords;
+    }
+
+    return song.richWords.map((word, index) => ({
+      text: word.word,
+      start: word.start,
+      end: word.end,
+      lineIndex: index,
+    }));
+  }, [song?.richWords, estimatedWords]);
 
   // ==========================================
   // FIND CURRENT WORD
@@ -341,9 +470,28 @@ function App() {
 
   // ==========================================
   // PREVIOUS / NEXT TRACK
+  //
+  // Unlike seek() below, these never reset the local clock -
+  // they just fired the request and waited for the next poll
+  // (up to ~1s later, longer if that poll's correction didn't
+  // land immediately) to notice the position had changed. That's
+  // why the bar would sit wherever the old song left it instead
+  // of snapping back to 0. Resetting the clock immediately, the
+  // same way seek() does, fixes that.
   // ==========================================
 
+  const resetClockForTrackChange = () => {
+    clockRef.current.position = 0;
+    clockRef.current.timestamp = performance.now();
+    clockRef.current.playing = false;
+
+    setDisplayPosition(0);
+    setCurrentWord(0);
+  };
+
   const previousTrack = async () => {
+    resetClockForTrackChange();
+
     try {
       await fetch(
         `${BRIDGE_URL}/api/previous`,
@@ -365,6 +513,8 @@ function App() {
   };
 
   const nextTrack = async () => {
+    resetClockForTrackChange();
+
     try {
       await fetch(
         `${BRIDGE_URL}/api/next`,

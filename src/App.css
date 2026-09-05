@@ -148,7 +148,8 @@ body {
 ========================================= */
 
 .album-wrapper {
-  width: min(100%, 390px);
+  width: auto;
+  height: min(390px, 100%);
 
   aspect-ratio: 1;
 

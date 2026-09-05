@@ -21,20 +21,16 @@ function App() {
     songRef.current = song;
   }, [song]);
 
-  // ==========================================
-  // GET CURRENT SONG FROM SPOTIFY BRIDGE
-  // ==========================================
+  // ============================================================
+  // GET CURRENT SONG
+  // ============================================================
 
   const getSong = async () => {
     try {
-      const response = await fetch(
-        `${BRIDGE_URL}/api/current`
-      );
+      const response = await fetch(`${BRIDGE_URL}/api/current`);
 
       if (!response.ok) {
-        throw new Error(
-          `Bridge returned ${response.status}`
-        );
+        throw new Error(`Bridge returned ${response.status}`);
       }
 
       const data = await response.json();
@@ -48,10 +44,23 @@ function App() {
 
       const now = performance.now();
 
-      const spotifyPosition =
+      let spotifyPosition =
         typeof data.position === "number"
           ? data.position
           : 0;
+
+      if (typeof data.sampledAt === "number") {
+        const latency =
+          Date.now() / 1000 - data.sampledAt;
+
+        if (
+          data.playing &&
+          latency > 0 &&
+          latency < 5
+        ) {
+          spotifyPosition += latency;
+        }
+      }
 
       const clock = clockRef.current;
 
@@ -65,13 +74,6 @@ function App() {
       const difference =
         spotifyPosition - estimatedPosition;
 
-      /*
-       * Spotify's reported position can move
-       * slightly backwards/forwards.
-       *
-       * Only correct the local clock when the
-       * difference is significant.
-       */
       if (Math.abs(difference) > 0.5) {
         clock.position = spotifyPosition;
       } else {
@@ -90,26 +92,21 @@ function App() {
     }
   };
 
-  // ==========================================
-  // POLL SPOTIFY EVERY SECOND
-  // ==========================================
+  // ============================================================
+  // POLL SPOTIFY
+  // ============================================================
 
   useEffect(() => {
     getSong();
 
-    const interval = setInterval(
-      getSong,
-      1000
-    );
+    const interval = setInterval(getSong, 1000);
 
-    return () => {
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, []);
 
-  // ==========================================
-  // SMOOTH LOCAL PLAYBACK CLOCK
-  // ==========================================
+  // ============================================================
+  // LOCAL CLOCK
+  // ============================================================
 
   useEffect(() => {
     let animationFrame;
@@ -147,9 +144,9 @@ function App() {
     };
   }, []);
 
-  // ==========================================
-  // PARSE LRC LYRICS
-  // ==========================================
+  // ============================================================
+  // PARSE LRC
+  // ============================================================
 
   const parsedLines = useMemo(() => {
     if (!song?.syncedLyrics) {
@@ -167,113 +164,145 @@ function App() {
           return null;
         }
 
-        const minutes =
-          parseInt(match[1], 10);
-
-        const seconds =
-          parseFloat(match[2]);
+        const minutes = parseInt(match[1], 10);
+        const seconds = parseFloat(match[2]);
 
         return {
           time:
             minutes * 60 +
             seconds,
-
           text: match[3].trim(),
         };
       })
       .filter(Boolean);
   }, [song?.syncedLyrics]);
 
-  // ==========================================
-  // TURN LINES INTO WORDS
-  // ==========================================
+  // ============================================================
+  // SYLLABLE ESTIMATION
+  // ============================================================
 
-  const words = useMemo(() => {
+  const estimateSyllables = (word) => {
+    const clean = word
+      .toLowerCase()
+      .replace(/[^a-z']/g, "");
+
+    if (!clean) {
+      return 1;
+    }
+
+    const vowelGroups =
+      clean.match(/[aeiouy]+/g);
+
+    let count = vowelGroups
+      ? vowelGroups.length
+      : 1;
+
+    if (
+      clean.endsWith("e") &&
+      !clean.endsWith("le") &&
+      count > 1
+    ) {
+      count--;
+    }
+
+    return Math.max(1, count);
+  };
+
+  // ============================================================
+  // CREATE WORD TIMINGS
+  // ============================================================
+
+  const estimatedWords = useMemo(() => {
     if (!parsedLines.length) {
       return [];
     }
 
     const result = [];
 
-    parsedLines.forEach(
-      (line, lineIndex) => {
-        if (!line.text) {
-          return;
-        }
-
-        const lineWords =
-          line.text
-            .split(/\s+/)
-            .filter(Boolean);
-
-        const nextLine =
-          parsedLines[lineIndex + 1];
-
-        let lineEnd;
-
-        if (nextLine) {
-          lineEnd = nextLine.time;
-        } else if (song?.duration) {
-          lineEnd = song.duration;
-        } else {
-          lineEnd =
-            line.time +
-            Math.max(
-              lineWords.length * 0.4,
-              2
-            );
-        }
-
-        const lineDuration =
-          Math.max(
-            lineEnd - line.time,
-            0.1
-          );
-
-        /*
-         * Weight each word's share of the line's duration by
-         * its character length instead of splitting evenly.
-         * LRC only gives us line-level timestamps, so exact
-         * per-word timing isn't available - but longer words
-         * really do take longer to sing than short ones, so
-         * this tracks the actual audio noticeably better than
-         * a flat split.
-         */
-        const totalChars =
-          lineWords.reduce(
-            (sum, w) => sum + w.length,
-            0
-          ) || 1;
-
-        let cursor = line.time;
-
-        lineWords.forEach(
-          (word, wordIndex) => {
-            const share =
-              word.length / totalChars;
-
-            const wordDuration =
-              lineDuration * share;
-
-            const start = cursor;
-
-            const end =
-              wordIndex === lineWords.length - 1
-                ? lineEnd
-                : cursor + wordDuration;
-
-            cursor = end;
-
-            result.push({
-              text: word,
-              start,
-              end,
-              lineIndex,
-            });
-          }
-        );
+    parsedLines.forEach((line, lineIndex) => {
+      if (!line.text) {
+        return;
       }
-    );
+
+      const lineWords = line.text
+        .split(/\s+/)
+        .filter(Boolean);
+
+      const nextLine =
+        parsedLines[lineIndex + 1];
+
+      let lineEnd;
+
+      if (nextLine) {
+        lineEnd = nextLine.time;
+      } else if (song?.duration) {
+        lineEnd = song.duration;
+      } else {
+        lineEnd =
+          line.time +
+          Math.max(
+            lineWords.length * 0.4,
+            2
+          );
+      }
+
+      const lineDuration =
+        Math.max(
+          lineEnd - line.time,
+          0.1
+        );
+
+      const weights =
+        lineWords.map((word) => {
+          const syllables =
+            estimateSyllables(word);
+
+          const punctuation =
+            /[,.!?;:]$/.test(word);
+
+          return (
+            syllables +
+            (punctuation ? 0.35 : 0)
+          );
+        });
+
+      const totalWeight =
+        weights.reduce(
+          (sum, value) =>
+            sum + value,
+          0
+        ) || 1;
+
+      let cursor = line.time;
+
+      lineWords.forEach(
+        (word, wordIndex) => {
+          const weight =
+            weights[wordIndex];
+
+          const duration =
+            Math.max(
+              lineDuration *
+                (weight /
+                  totalWeight),
+              0.12
+            );
+
+          const start = cursor;
+          const end =
+            start + duration;
+
+          cursor = end;
+
+          result.push({
+            text: word,
+            start,
+            end,
+            lineIndex,
+          });
+        }
+      );
+    });
 
     return result;
   }, [
@@ -281,69 +310,101 @@ function App() {
     song?.duration,
   ]);
 
-  // ==========================================
-  // FIND CURRENT WORD
-  // ==========================================
+  // ============================================================
+  // WORD DATA
+  // ============================================================
+
+  const words = useMemo(() => {
+    if (
+      Array.isArray(song?.richWords) &&
+      song.richWords.length
+    ) {
+      return song.richWords.map(
+        (word, index) => ({
+          text: word.word,
+          start: word.start,
+          end: word.end,
+          index,
+        })
+      );
+    }
+
+    return estimatedWords.map(
+      (word, index) => ({
+        ...word,
+        index,
+      })
+    );
+  }, [
+    song?.richWords,
+    estimatedWords,
+  ]);
+
+  // ============================================================
+  // ACTIVE WORD
+  // ============================================================
 
   useEffect(() => {
     if (!words.length) {
       return;
     }
 
-    let index = 0;
+    let activeIndex = 0;
 
-    for (
-      let i = 0;
-      i < words.length;
-      i++
-    ) {
+    for (let i = 0; i < words.length; i++) {
       if (
         displayPosition >=
         words[i].start
       ) {
-        index = i;
+        activeIndex = i;
       } else {
         break;
       }
     }
 
-    setCurrentWord(index);
+    setCurrentWord(activeIndex);
   }, [
     displayPosition,
     words,
   ]);
 
-  // ==========================================
-  // PLAY / PAUSE
-  // ==========================================
+  // ============================================================
+  // CONTROLS
+  // ============================================================
 
-  const togglePlayPause =
-    async () => {
-      try {
-        await fetch(
-          `${BRIDGE_URL}/api/play-pause`,
-          {
-            method: "POST",
-          }
-        );
+  const togglePlayPause = async () => {
+    try {
+      await fetch(
+        `${BRIDGE_URL}/api/play-pause`,
+        {
+          method: "POST",
+        }
+      );
 
-        setTimeout(
-          getSong,
-          150
-        );
-      } catch (error) {
-        console.error(
-          "Play/pause failed:",
-          error
-        );
-      }
+      setTimeout(getSong, 150);
+    } catch (error) {
+      console.error(
+        "Play/pause failed:",
+        error
+      );
+    }
+  };
+
+  const resetClock = () => {
+    clockRef.current = {
+      position: 0,
+      timestamp:
+        performance.now(),
+      playing: false,
     };
 
-  // ==========================================
-  // PREVIOUS / NEXT TRACK
-  // ==========================================
+    setDisplayPosition(0);
+    setCurrentWord(0);
+  };
 
   const previousTrack = async () => {
+    resetClock();
+
     try {
       await fetch(
         `${BRIDGE_URL}/api/previous`,
@@ -352,19 +413,18 @@ function App() {
         }
       );
 
-      setTimeout(
-        getSong,
-        300
-      );
+      setTimeout(getSong, 300);
     } catch (error) {
       console.error(
-        "Could not skip to previous track:",
+        "Previous track failed:",
         error
       );
     }
   };
 
   const nextTrack = async () => {
+    resetClock();
+
     try {
       await fetch(
         `${BRIDGE_URL}/api/next`,
@@ -373,21 +433,14 @@ function App() {
         }
       );
 
-      setTimeout(
-        getSong,
-        300
-      );
+      setTimeout(getSong, 300);
     } catch (error) {
       console.error(
-        "Could not skip to next track:",
+        "Next track failed:",
         error
       );
     }
   };
-
-  // ==========================================
-  // SEEK
-  // ==========================================
 
   const seek = async (amount) => {
     if (!song) {
@@ -409,28 +462,23 @@ function App() {
         )
       );
 
-    // Update UI immediately
     clockRef.current.position =
       newPosition;
 
     clockRef.current.timestamp =
       performance.now();
 
-    setDisplayPosition(
-      newPosition
-    );
+    setDisplayPosition(newPosition);
 
     try {
       await fetch(
         `${BRIDGE_URL}/api/seek`,
         {
           method: "POST",
-
           headers: {
             "Content-Type":
               "application/json",
           },
-
           body: JSON.stringify({
             position:
               newPosition,
@@ -438,10 +486,7 @@ function App() {
         }
       );
 
-      setTimeout(
-        getSong,
-        150
-      );
+      setTimeout(getSong, 150);
     } catch (error) {
       console.error(
         "Seek failed:",
@@ -450,13 +495,11 @@ function App() {
     }
   };
 
-  // ==========================================
-  // TIME FORMAT
-  // ==========================================
+  // ============================================================
+  // FORMAT TIME
+  // ============================================================
 
-  const formatTime = (
-    seconds
-  ) => {
+  const formatTime = (seconds) => {
     if (
       seconds === undefined ||
       seconds === null ||
@@ -466,23 +509,19 @@ function App() {
     }
 
     const minutes =
-      Math.floor(
-        seconds / 60
-      );
+      Math.floor(seconds / 60);
 
-    const remainingSeconds =
-      Math.floor(
-        seconds % 60
-      );
+    const remaining =
+      Math.floor(seconds % 60);
 
-    return `${minutes}:${remainingSeconds
+    return `${minutes}:${remaining
       .toString()
       .padStart(2, "0")}`;
   };
 
-  // ==========================================
+  // ============================================================
   // PROGRESS
-  // ==========================================
+  // ============================================================
 
   const progress =
     song?.duration
@@ -494,54 +533,27 @@ function App() {
         )
       : 0;
 
-  // ==========================================
-  // CONTINUOUS ROLL PROGRESS
-  //
-  // Instead of only moving the word stack when
-  // `currentWord` ticks over to a new integer, we track
-  // how far through the current word's timing window we
-  // are (0 -> 1) and use that as a fractional offset. This
-  // makes the stack glide continuously in sync with actual
-  // playback instead of snapping word to word.
-  // ==========================================
+  // ============================================================
+  // VISIBLE WORDS
+  // ============================================================
 
-  const currentWordObj = words[currentWord];
+  const visibleWords = useMemo(() => {
+    if (!words.length) {
+      return [];
+    }
 
-  let wordProgress = 0;
+    const result = [];
 
-  if (currentWordObj) {
-    const span =
-      currentWordObj.end - currentWordObj.start;
-
-    wordProgress =
-      span > 0
-        ? (displayPosition - currentWordObj.start) / span
-        : 0;
-
-    wordProgress = Math.min(1, Math.max(0, wordProgress));
-  }
-
-  // ==========================================
-  // ONLY SHOW 3-4 WORDS AT A TIME
-  // (1 before, current, 2 after)
-  // ==========================================
-
-  const PREV_WORDS = 1;
-  const NEXT_WORDS = 2;
-
-  const visibleWords = [];
-
-  if (words.length) {
     const start =
       Math.max(
         0,
-        currentWord - PREV_WORDS
+        currentWord - 2
       );
 
     const end =
       Math.min(
         words.length,
-        currentWord + NEXT_WORDS + 1
+        currentWord + 4
       );
 
     for (
@@ -549,16 +561,18 @@ function App() {
       i < end;
       i++
     ) {
-      visibleWords.push({
-        ...words[i],
-        index: i,
-      });
+      result.push(words[i]);
     }
-  }
 
-  // ==========================================
-  // LOADING
-  // ==========================================
+    return result;
+  }, [
+    words,
+    currentWord,
+  ]);
+
+  // ============================================================
+  // RENDER
+  // ============================================================
 
   if (!song) {
     return (
@@ -568,34 +582,27 @@ function App() {
     );
   }
 
-  // ==========================================
-  // UI
-  // ==========================================
-
   return (
-    <main className={`app ${showLyrics ? "" : "app-no-lyrics"}`}>
-
-      {/* =====================================
-          HEADER
-      ====================================== */}
-
+    <main
+      className={`app ${
+        showLyrics
+          ? ""
+          : "app-no-lyrics"
+      }`}
+    >
       <header className="top-bar">
         <div className="brand">
           MINIMAL SPOTIFY
         </div>
       </header>
 
-
-      {/* =====================================
-          LEFT PLAYER
-      ====================================== */}
+      {/* ======================================================
+          PLAYER
+      ======================================================= */}
 
       <section className="player-panel">
 
-        {/* ALBUM */}
-
         <div className="album-wrapper">
-
           {song.artwork ? (
             <img
               className="album-cover"
@@ -610,14 +617,9 @@ function App() {
               No artwork
             </div>
           )}
-
         </div>
 
-
-        {/* SONG INFORMATION */}
-
         <div className="song-information">
-
           <h1>
             {song.title ||
               "Nothing playing"}
@@ -627,16 +629,10 @@ function App() {
             {song.artist ||
               "Unknown artist"}
           </p>
-
         </div>
 
-
-        {/* PROGRESS */}
-
         <div className="progress-section">
-
           <div className="progress-bar">
-
             <div
               className="progress-fill"
               style={{
@@ -644,12 +640,9 @@ function App() {
                   `${progress}%`,
               }}
             />
-
           </div>
 
-
           <div className="time-labels">
-
             <span>
               {formatTime(
                 displayPosition
@@ -661,39 +654,26 @@ function App() {
                 song.duration
               )}
             </span>
-
           </div>
-
         </div>
-
-
-        {/* =================================
-            CONTROLS
-        ================================== */}
 
         <div className="controls">
 
-          {/* PREVIOUS TRACK */}
-
           <button
             className="control-button track-button"
-            onClick={previousTrack}
-            aria-label="Previous track"
+            onClick={
+              previousTrack
+            }
           >
             ⏮
           </button>
-
-
-          {/* -10 */}
 
           <button
             className="control-button seek-button"
             onClick={() =>
               seek(-10)
             }
-            aria-label="Back 10 seconds"
           >
-
             <span className="seek-arrow">
               ↶
             </span>
@@ -701,24 +681,14 @@ function App() {
             <span className="seek-number">
               10
             </span>
-
           </button>
-
-
-          {/* PLAY / PAUSE */}
 
           <button
             className="control-button play-button"
             onClick={
               togglePlayPause
             }
-            aria-label={
-              song.playing
-                ? "Pause"
-                : "Play"
-            }
           >
-
             {song.playing ? (
               <span className="pause-symbol">
                 II
@@ -728,20 +698,14 @@ function App() {
                 ▶
               </span>
             )}
-
           </button>
-
-
-          {/* +10 */}
 
           <button
             className="control-button seek-button"
             onClick={() =>
               seek(10)
             }
-            aria-label="Forward 10 seconds"
           >
-
             <span className="seek-number">
               10
             </span>
@@ -749,32 +713,33 @@ function App() {
             <span className="seek-arrow forward">
               ↷
             </span>
-
           </button>
-
-
-          {/* NEXT TRACK */}
 
           <button
             className="control-button track-button"
-            onClick={nextTrack}
-            aria-label="Next track"
+            onClick={
+              nextTrack
+            }
           >
             ⏭
           </button>
 
         </div>
 
-
-        {/* LYRICS TOGGLE */}
-
         <button
           type="button"
-          className={`lyrics-label ${showLyrics ? "active" : ""}`}
-          onClick={() => setShowLyrics((value) => !value)}
-          aria-label="Toggle lyrics"
+          className={`lyrics-label ${
+            showLyrics
+              ? "active"
+              : ""
+          }`}
+          onClick={() =>
+            setShowLyrics(
+              (value) =>
+                !value
+            )
+          }
         >
-
           <span className="lyrics-icon">
             ▰
           </span>
@@ -782,122 +747,129 @@ function App() {
           <span>
             Lyrics
           </span>
-
         </button>
 
       </section>
 
-
-      {/* =====================================
-          RIGHT LYRICS
-      ====================================== */}
+      {/* ======================================================
+          LYRICS
+      ======================================================= */}
 
       {showLyrics && (
+        <section className="lyrics-panel">
 
-      <section className="lyrics-panel">
+          <div className="lyrics-top-line" />
 
-        <div className="lyrics-top-line" />
+          <div className="word-stage">
 
+            {words.length ? (
+              visibleWords.map(
+                (word) => {
 
-        <div className="word-stage">
+                  const distance =
+                    word.index -
+                    currentWord;
 
-          {words.length ? (
+                  const isCurrent =
+                    distance === 0;
 
-            visibleWords.map(
-              (word) => {
+                  const isPrevious =
+                    distance < 0;
 
-                const distance =
-                  word.index -
-                  currentWord;
+                  /*
+                   * Alternate entrance direction.
+                   *
+                   * Even words:
+                   * RIGHT -> CENTRE
+                   *
+                   * Odd words:
+                   * LEFT -> CENTRE
+                   */
 
-                // Subtract the fractional progress through
-                // the current word so the whole stack glides
-                // continuously instead of jumping in whole
-                // steps.
-                const rolledDistance =
-                  distance - wordProgress;
+                  const direction =
+                    word.index % 2 === 0
+                      ? "right"
+                      : "left";
 
-                let className =
-                  "lyric-word";
+                  let className =
+                    "lyric-word";
 
-                if (
-                  word.index ===
-                  currentWord
-                ) {
-                  className +=
-                    " current-word";
-                } else if (
-                  distance < 0
-                ) {
-                  className +=
-                    " previous-word";
-                } else {
-                  className +=
-                    " next-word";
+                  if (
+                    isCurrent
+                  ) {
+                    className +=
+                      " current-word";
+                  } else if (
+                    isPrevious
+                  ) {
+                    className +=
+                      " previous-word";
+                  } else {
+                    className +=
+                      " next-word";
+                  }
+
+                  return (
+                    <div
+                      key={
+                        word.index
+                      }
+                      className={
+                        className
+                      }
+                      data-direction={
+                        direction
+                      }
+                      style={{
+                        "--distance":
+                          distance,
+                      }}
+                    >
+                      <span className="word-inner">
+                        {
+                          word.text
+                        }
+                      </span>
+                    </div>
+                  );
                 }
-
-                return (
-                  <div
-                    key={`${word.index}-${word.text}`}
-                    className={
-                      className
-                    }
-                    style={{
-                      "--word-y":
-                        `${rolledDistance * 74}px`,
-                    }}
-                  >
-                    {word.text}
-                  </div>
-                );
-              }
-            )
-
-          ) : (
-
-            <div className="no-lyrics">
-              Lyrics not available
-            </div>
-
-          )}
-
-        </div>
-
-
-        {/* FOOTER */}
-
-        <div className="lyrics-footer">
-
-          <div className="waveform">
-
-            {Array.from({
-              length: 13,
-            }).map(
-              (_, i) => (
-                <span
-                  key={i}
-                  style={{
-                    "--i": i,
-                  }}
-                />
               )
+            ) : (
+              <div className="no-lyrics">
+                Lyrics not available
+              </div>
             )}
 
           </div>
 
-          <div className="footer-song">
-            {song.title}
+          <div className="lyrics-footer">
+
+            <div className="waveform">
+              {Array.from({
+                length: 13,
+              }).map(
+                (_, index) => (
+                  <span
+                    key={index}
+                    style={{
+                      "--i":
+                        index,
+                    }}
+                  />
+                )
+              )}
+            </div>
+
+            <div className="footer-song">
+              {song.title}
+            </div>
+
           </div>
 
-        </div>
+          <div className="lyrics-bottom-line" />
 
-
-        <div className="lyrics-bottom-line" />
-
-      </section>
-
+        </section>
       )}
-
     </main>
   );
 }
